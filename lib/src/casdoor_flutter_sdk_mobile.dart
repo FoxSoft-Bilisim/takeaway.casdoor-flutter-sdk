@@ -14,6 +14,7 @@
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:ui';
 
 import 'package:casdoor_flutter_sdk/casdoor_flutter_sdk.dart';
 import 'package:flutter/cupertino.dart';
@@ -71,58 +72,268 @@ class FullScreenAuthPage extends StatefulWidget {
 
 class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
   double progress = 0;
+  bool _isLoading = true;
+  Timer? _minimumDisplayTimer;
+  bool _webViewReady = false;
+  InAppWebViewController? _webViewController;
+  bool _isDisposed = false; // Disposed kontrolü
+
+  static const Color primaryColor = Color(0xFF00897C);
+  static const Color secondaryColor = Color(0xFFEC6608);
+
+  @override
+  void initState() {
+    super.initState();
+    // Minimum 2 saniye overlay göster
+    _minimumDisplayTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (_webViewReady && mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    _minimumDisplayTimer?.cancel();
+    _webViewController = null;
+    super.dispose();
+  }
+
+  Future<bool> _onWillPop() async {
+    if (_webViewController != null) {
+      final canGoBack = await _webViewController!.canGoBack();
+      if (canGoBack) {
+        await _webViewController!.goBack();
+        return false; // Sayfayı kapatma
+      }
+    }
+    return true; // Sayfayı kapat
+  }
 
   Widget webViewWidget(BuildContext ctx) {
-    return Stack(
-      children: [
-        InAppWebView(
-          initialUrlRequest:
-              URLRequest(url: WebUri.uri(Uri.parse(widget.params.url))),
-          initialSettings: InAppWebViewSettings(
-            userAgent: CASDOOR_USER_AGENT,
-            useShouldOverrideUrlLoading: true,
-            useOnLoadResource: true,
-          ),
-          shouldOverrideUrlLoading: (controller, navigationAction) async {
-            final uri = navigationAction.request.url!;
+    return InAppWebView(
+      initialUrlRequest:
+          URLRequest(url: WebUri.uri(Uri.parse(widget.params.url))),
+      initialSettings: InAppWebViewSettings(
+        userAgent: CASDOOR_USER_AGENT,
+        useShouldOverrideUrlLoading: true,
+        useOnLoadResource: true,
+        // Cache ve session yönetimi
+        cacheEnabled: false, // Cache'i devre dışı bırak
+        clearCache: true, // Her açılışta cache temizle
+        clearSessionCache: true, // Session cache temizle
+        incognito: true, // Incognito mode - hiçbir şey saklanmaz
+      ),
+      onWebViewCreated: (controller) {
+        _webViewController = controller;
+      },
+      shouldOverrideUrlLoading: (controller, navigationAction) async {
+        final uri = navigationAction.request.url!;
 
-            if (uri.scheme == widget.params.callbackUrlScheme) {
-              Navigator.pop(ctx, uri.toString());
-              return NavigationActionPolicy.CANCEL;
+        if (uri.scheme == widget.params.callbackUrlScheme) {
+          // Callback URL yakalandı
+          if (!_isDisposed && mounted) {
+            // Loading'i durdur ve sayfayı kapat
+            try {
+              await controller.stopLoading();
+            } catch (e) {
+              print('⚠️ Stop loading error: $e');
             }
 
-            return NavigationActionPolicy.ALLOW;
-          },
-          onProgressChanged: (controller, progress) {
-            setState(() {
-              this.progress = progress / 100;
-            });
-          },
-        ),
-        progress < 1.0 ? LinearProgressIndicator(value: progress) : Container(),
-      ],
+            // Navigator'ı kapat ve callback URL'i döndür
+            Navigator.pop(ctx, uri.toString());
+          }
+          return NavigationActionPolicy.CANCEL;
+        }
+
+        return NavigationActionPolicy.ALLOW;
+      },
+      onProgressChanged: (controller, progress) {
+        setState(() {
+          this.progress = progress / 100;
+        });
+      },
+      onLoadStop: (controller, url) async {
+        // Sayfa yüklendi, ek 500ms bekle (render için)
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        _webViewReady = true;
+
+        // Timer bittiyse overlay'i kapat
+        if (!(_minimumDisplayTimer?.isActive ?? false) && mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      },
     );
   }
 
   Widget materialAuthWidget(BuildContext ctx) {
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: false,
-        title: const Text('Login'),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+
+        final shouldPop = await _onWillPop();
+        if (shouldPop && ctx.mounted) {
+          Navigator.of(ctx).pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: primaryColor,
+        body: Stack(
+          children: [
+            // WebView (arka planda)
+            SafeArea(
+              top: false,
+              bottom: false,
+              left: false,
+              right: false,
+              child: webViewWidget(ctx),
+            ),
+
+            // Loading Overlay
+            if (_isLoading)
+              Positioned.fill(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                  child: Container(
+                    color: primaryColor.withOpacity(0.95),
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(14),
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 4,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                secondaryColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            'Giriş ekranı yükleniyor...',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Lütfen bekleyin',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: 200,
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              backgroundColor: Colors.white.withOpacity(0.2),
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                secondaryColor,
+                              ),
+                              minHeight: 3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
-      body: webViewWidget(ctx),
     );
   }
 
   Widget cupertinoAuthWidget(BuildContext ctx) {
-    return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        leading: CupertinoNavigationBarBackButton(
-          onPressed: () => Navigator.pop(ctx),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+
+        final shouldPop = await _onWillPop();
+        if (shouldPop && ctx.mounted) {
+          Navigator.of(ctx).pop();
+        }
+      },
+      child: CupertinoPageScaffold(
+        backgroundColor: primaryColor,
+        child: Stack(
+          children: [
+            SafeArea(
+              top: false,
+              bottom: false,
+              left: false,
+              right: false,
+              child: webViewWidget(ctx),
+            ),
+            if (_isLoading)
+              Positioned.fill(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                  child: Container(
+                    color: primaryColor.withOpacity(0.95),
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(14),
+                            child: const CupertinoActivityIndicator(
+                              radius: 20,
+                              color: secondaryColor,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            'Giriş ekranı yükleniyor...',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Lütfen bekleyin',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
-        middle: const Text('Login'),
       ),
-      child: webViewWidget(ctx),
     );
   }
 
@@ -142,7 +353,6 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
   WebAuthenticationSession? session;
   bool willClearCache = false;
 
-  /// Registers this class as the default instance of [PathProviderPlatform]
   static void registerWith() {
     CasdoorFlutterSdkPlatform.instance = CasdoorFlutterSdkMobile();
   }
@@ -155,13 +365,12 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
       await cookieManager.removeSessionCookies();
     }
     await InAppWebViewController.clearAllCache();
-
     willClearCache = true;
-
     return true;
   }
 
   Future<String> _fullScreenAuth(CasdoorSdkParams params) async {
+    // Route'u push et
     final result = await Navigator.push(
       params.buildContext!,
       MaterialPageRoute(
@@ -169,7 +378,11 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
       ),
     );
 
-    if (result is String) {
+    // Route kapandıktan sonra ek cleanup
+    // Bir sonraki açılışta eski state kalmasın
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    if (result is String && result.isNotEmpty) {
       return result;
     }
 
