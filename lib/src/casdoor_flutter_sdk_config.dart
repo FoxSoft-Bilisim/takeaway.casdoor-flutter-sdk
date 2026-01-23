@@ -43,6 +43,11 @@ class CasdoorSdkParams {
     this.showFullscreen = false,
     this.isMaterialStyle = true,
     this.clearCache = false,
+
+    this.urlContainsFilters,
+    this.monitorUrlChanges = true, // SPA desteği için
+    this.urlCheckIntervalMs = 500,
+    this.onUrlChange,
   });
 
   final String url;
@@ -52,6 +57,11 @@ class CasdoorSdkParams {
   bool isMaterialStyle;
   bool clearCache;
 
+  final List<String>? urlContainsFilters; // URL'de aranacak string'ler
+  final bool monitorUrlChanges; // SPA URL değişikliklerini izle
+  final int urlCheckIntervalMs; // Polling interval (ms)
+  final Function(String url)? onUrlChange; // Her URL değişiminde callback
+
   CasdoorSdkParams copyWith({
     String? url,
     String? callbackUrlScheme,
@@ -59,13 +69,21 @@ class CasdoorSdkParams {
     bool? showFullscreen,
     bool? isMaterialStyle,
     bool? clearCache,
-  }) =>
-      CasdoorSdkParams(
-        url: url ?? this.url,
-        callbackUrlScheme: callbackUrlScheme ?? this.callbackUrlScheme,
-        buildContext: buildContext ?? this.buildContext,
-        showFullscreen: showFullscreen ?? this.showFullscreen,
-        isMaterialStyle: isMaterialStyle ?? this.isMaterialStyle,
-        clearCache: clearCache ?? this.clearCache,
-      );
+
+    List<String>? urlContainsFilters,
+    bool? monitorUrlChanges,
+    int? urlCheckIntervalMs,
+    Function(String url)? onUrlChange,
+  }) => CasdoorSdkParams(
+    url: url ?? this.url,
+    callbackUrlScheme: callbackUrlScheme ?? this.callbackUrlScheme,
+    buildContext: buildContext ?? this.buildContext,
+    showFullscreen: showFullscreen ?? this.showFullscreen,
+    isMaterialStyle: isMaterialStyle ?? this.isMaterialStyle,
+    clearCache: clearCache ?? this.clearCache,
+    urlContainsFilters: urlContainsFilters ?? this.urlContainsFilters,
+    monitorUrlChanges: monitorUrlChanges ?? this.monitorUrlChanges,
+    urlCheckIntervalMs: urlCheckIntervalMs ?? this.urlCheckIntervalMs,
+    onUrlChange: onUrlChange ?? this.onUrlChange,
+  );
 }

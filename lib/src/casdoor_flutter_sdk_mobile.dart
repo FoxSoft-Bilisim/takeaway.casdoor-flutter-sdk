@@ -29,13 +29,13 @@ class InAppAuthBrowser extends InAppBrowser {
 
   Function? onExitCallback;
   Future<NavigationActionPolicy> Function(Uri? url)?
-      onShouldOverrideUrlLoadingCallback;
+  onShouldOverrideUrlLoadingCallback;
 
   void setOnExitCallback(Function cb) => (onExitCallback = cb);
 
   void setOnShouldOverrideUrlLoadingCallback(
-          Future<NavigationActionPolicy> Function(Uri? url) cb) =>
-      onShouldOverrideUrlLoadingCallback = cb;
+    Future<NavigationActionPolicy> Function(Uri? url) cb,
+  ) => onShouldOverrideUrlLoadingCallback = cb;
 
   @override
   void onExit() {
@@ -46,7 +46,8 @@ class InAppAuthBrowser extends InAppBrowser {
 
   @override
   Future<NavigationActionPolicy> shouldOverrideUrlLoading(
-      NavigationAction navigationAction) async {
+    NavigationAction navigationAction,
+  ) async {
     if (onShouldOverrideUrlLoadingCallback != null) {
       return onShouldOverrideUrlLoadingCallback!(navigationAction.request.url);
     }
@@ -58,10 +59,7 @@ class InAppAuthBrowser extends InAppBrowser {
 // -----------------------------------------------------------------------------
 
 class FullScreenAuthPage extends StatefulWidget {
-  const FullScreenAuthPage({
-    super.key,
-    required this.params,
-  });
+  const FullScreenAuthPage({super.key, required this.params});
 
   final CasdoorSdkParams params;
 
@@ -71,20 +69,129 @@ class FullScreenAuthPage extends StatefulWidget {
 
 class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
   double progress = 0;
+  String? _currentUrl; // YENİ: Mevcut URL'i takip et
+  Timer? _urlMonitorTimer; // YENİ: Periyodik kontrol için timer
+
+  @override
+  void dispose() {
+    _urlMonitorTimer?.cancel(); // YENİ: Timer'ı temizle
+    super.dispose();
+  }
+
+  // YENİ: URL kontrolü metodu
+  void _checkUrl(String url) {
+    if (_currentUrl == url) return;
+    _currentUrl = url;
+
+    debugPrint('URL changed: $url');
+
+    // onUrlChange callback
+    widget.params.onUrlChange?.call(url);
+
+    // Callback URL scheme kontrolü (mevcut)
+    final uri = Uri.parse(url);
+    if (uri.scheme == widget.params.callbackUrlScheme) {
+      debugPrint('Callback URL detected: $url');
+      Navigator.pop(context, url);
+      return;
+    }
+
+    // YENİ: Custom string filtreler - URL'de belirli string varsa kapat
+    if (widget.params.urlContainsFilters != null) {
+      for (final filter in widget.params.urlContainsFilters!) {
+        if (url.contains(filter)) {
+          debugPrint('URL filter matched: $filter in $url');
+          Navigator.pop(context, url);
+          return;
+        }
+      }
+    }
+  }
+
+  // YENİ: JavaScript injection ile URL monitoring
+  Future<void> _injectUrlMonitor(InAppWebViewController controller) async {
+    if (!widget.params.monitorUrlChanges) return;
+
+    try {
+      await controller.evaluateJavascript(
+        source:
+            '''
+        (function() {
+          if (window._casdoorMonitorInjected) return;
+          window._casdoorMonitorInjected = true;
+          
+          let lastUrl = window.location.href;
+          
+          function notifyUrlChange() {
+            const currentUrl = window.location.href;
+            if (currentUrl !== lastUrl) {
+              lastUrl = currentUrl;
+              // Flutter tarafına mesaj gönder
+              if (typeof flutter_inappwebview !== 'undefined') {
+                window.flutter_inappwebview.callHandler('urlChanged', currentUrl);
+              }
+            }
+          }
+          
+          // History API'yi override et
+          const originalPushState = history.pushState;
+          const originalReplaceState = history.replaceState;
+          
+          history.pushState = function() {
+            originalPushState.apply(history, arguments);
+            setTimeout(notifyUrlChange, 100);
+          };
+          
+          history.replaceState = function() {
+            originalReplaceState.apply(history, arguments);
+            setTimeout(notifyUrlChange, 100);
+          };
+          
+          // Hash değişikliklerini dinle
+          window.addEventListener('hashchange', notifyUrlChange);
+          
+          // Periyodik kontrol (fallback)
+          setInterval(notifyUrlChange, ${widget.params.urlCheckIntervalMs});
+          
+          // İlk URL'i bildir
+          notifyUrlChange();
+        })();
+      ''',
+      );
+    } catch (e) {
+      debugPrint('JavaScript injection error: $e');
+    }
+  }
 
   Widget webViewWidget(BuildContext ctx) {
     return Stack(
       children: [
         InAppWebView(
-          initialUrlRequest:
-              URLRequest(url: WebUri.uri(Uri.parse(widget.params.url))),
+          initialUrlRequest: URLRequest(
+            url: WebUri.uri(Uri.parse(widget.params.url)),
+          ),
           initialSettings: InAppWebViewSettings(
             userAgent: CASDOOR_USER_AGENT,
             useShouldOverrideUrlLoading: true,
             useOnLoadResource: true,
+            javaScriptEnabled: true, // YENİ: JavaScript'i açık tut
           ),
+          // YENİ: JavaScript handler ekle
+          onWebViewCreated: (controller) {
+            controller.addJavaScriptHandler(
+              handlerName: 'urlChanged',
+              callback: (args) {
+                if (args.isNotEmpty) {
+                  _checkUrl(args[0].toString());
+                }
+              },
+            );
+          },
           shouldOverrideUrlLoading: (controller, navigationAction) async {
             final uri = navigationAction.request.url!;
+
+            // YENİ: URL kontrolü yap
+            _checkUrl(uri.toString());
 
             if (uri.scheme == widget.params.callbackUrlScheme) {
               Navigator.pop(ctx, uri.toString());
@@ -93,10 +200,29 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
 
             return NavigationActionPolicy.ALLOW;
           },
+          onLoadStart: (controller, url) {
+            // YENİ: Sayfa yüklenmeye başladığında URL'i kontrol et
+            if (url != null) {
+              _checkUrl(url.toString());
+            }
+          },
+          onLoadStop: (controller, url) async {
+            // YENİ: Sayfa yüklendikten sonra JavaScript inject et
+            if (url != null) {
+              _checkUrl(url.toString());
+              await _injectUrlMonitor(controller);
+            }
+          },
           onProgressChanged: (controller, progress) {
             setState(() {
               this.progress = progress / 100;
             });
+          },
+          onUpdateVisitedHistory: (controller, url, isReload) {
+            // YENİ: History güncellendiğinde (back/forward) URL'i kontrol et
+            if (url != null && !isReload!) {
+              _checkUrl(url.toString());
+            }
           },
         ),
         progress < 1.0 ? LinearProgressIndicator(value: progress) : Container(),
@@ -106,10 +232,7 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
 
   Widget materialAuthWidget(BuildContext ctx) {
     return Scaffold(
-      appBar: AppBar(
-        centerTitle: false,
-        title: const Text('Login'),
-      ),
+      appBar: AppBar(centerTitle: false, title: const Text('Login')),
       body: webViewWidget(ctx),
     );
   }
@@ -176,9 +299,43 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
     throw CasdoorAuthCancelledException;
   }
 
+  // YENİ: InAppBrowser için de URL monitoring ekle
   Future<String> _inAppBrowserAuth(CasdoorSdkParams params) async {
     final Completer<String> isFinished = Completer<String>();
     final InAppAuthBrowser browser = InAppAuthBrowser();
+
+    // YENİ: URL kontrolü için helper fonksiyon
+    void checkUrl(Uri? returnUrl) {
+      if (returnUrl == null) return;
+
+      final url = returnUrl.toString();
+
+      // onUrlChange callback
+      params.onUrlChange?.call(url);
+
+      // Callback URL scheme kontrolü
+      if (returnUrl.scheme == params.callbackUrlScheme) {
+        if (!isFinished.isCompleted) {
+          isFinished.complete(url);
+          browser.close();
+        }
+        return;
+      }
+
+      // YENİ: Custom string filtreler
+      if (params.urlContainsFilters != null) {
+        for (final filter in params.urlContainsFilters!) {
+          if (url.contains(filter)) {
+            debugPrint('InAppBrowser: URL filter matched: $filter');
+            if (!isFinished.isCompleted) {
+              isFinished.complete(url);
+              browser.close();
+            }
+            return;
+          }
+        }
+      }
+    }
 
     browser.setOnExitCallback(() {
       if (!isFinished.isCompleted) {
@@ -187,10 +344,15 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
     });
 
     browser.setOnShouldOverrideUrlLoadingCallback((returnUrl) async {
+      // YENİ: Her URL değişikliğinde kontrol et
+      checkUrl(returnUrl);
+
       if (returnUrl != null) {
         if (returnUrl.scheme == params.callbackUrlScheme) {
-          isFinished.complete(returnUrl.toString());
-          browser.close();
+          if (!isFinished.isCompleted) {
+            isFinished.complete(returnUrl.toString());
+            browser.close();
+          }
           return NavigationActionPolicy.CANCEL;
         }
       }
@@ -204,6 +366,7 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
           userAgent: CASDOOR_USER_AGENT,
           useOnLoadResource: true,
           useShouldOverrideUrlLoading: true,
+          javaScriptEnabled: true, // YENİ: JavaScript aktif
         ),
         browserSettings: InAppBrowserSettings(
           hideUrlBar: true,
@@ -232,15 +395,19 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
       ),
       onComplete:
           (WebUri? returnUrl, WebAuthenticationSessionError? error) async {
-        if (returnUrl != null) {
-          isFinished.complete(returnUrl.rawValue);
-        }
-        await session?.dispose();
-        session = null;
-        if (!isFinished.isCompleted) {
-          isFinished.completeError(CasdoorAuthCancelledException);
-        }
-      },
+            if (returnUrl != null) {
+              // YENİ: URL kontrolü
+              final url = returnUrl.rawValue;
+              params.onUrlChange?.call(url);
+
+              isFinished.complete(url);
+            }
+            await session?.dispose();
+            session = null;
+            if (!isFinished.isCompleted) {
+              isFinished.completeError(CasdoorAuthCancelledException);
+            }
+          },
     );
 
     if (await session?.canStart() ?? false) {
@@ -255,16 +422,19 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
 
   @override
   Future<String> authenticate(CasdoorSdkParams params) async {
-    final CasdoorSdkParams newParams =
-        (willClearCache == true) ? params.copyWith(clearCache: true) : params;
+    final CasdoorSdkParams newParams = (willClearCache == true)
+        ? params.copyWith(clearCache: true)
+        : params;
 
     if (newParams.clearCache == true) {
       await clearCache();
       willClearCache = false;
     }
 
-    if (([TargetPlatform.android, TargetPlatform.iOS]
-            .contains(defaultTargetPlatform)) &&
+    if (([
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+        ].contains(defaultTargetPlatform)) &&
         (params.showFullscreen == true)) {
       return _fullScreenAuth(newParams);
     } else if ((defaultTargetPlatform == TargetPlatform.iOS) &&

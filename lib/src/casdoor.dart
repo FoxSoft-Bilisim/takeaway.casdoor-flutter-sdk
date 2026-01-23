@@ -53,48 +53,49 @@ class Casdoor {
 
   Uri getSigninUrl({String scope = 'read', String? state}) {
     return Uri(
-        scheme: parseScheme(),
-        host: parseHost(),
-        port: parsePort(),
-        path: 'login/oauth/authorize',
-        queryParameters: {
-          'client_id': config.clientId,
-          'response_type': 'code',
-          'scope': scope,
-          'state': state ?? config.appName,
-          'code_challenge_method': 'S256',
-          'nonce': nonce,
-          'code_challenge': generateCodeChallenge(codeVerifier),
-          'redirect_uri': config.redirectUri
-        });
+      scheme: parseScheme(),
+      host: parseHost(),
+      port: parsePort(),
+      path: 'login/oauth/authorize',
+      queryParameters: {
+        'client_id': config.clientId,
+        'response_type': 'code',
+        'scope': scope,
+        'state': state ?? config.appName,
+        'code_challenge_method': 'S256',
+        'nonce': nonce,
+        'code_challenge': generateCodeChallenge(codeVerifier),
+        'redirect_uri': config.redirectUri,
+      },
+    );
   }
 
   Uri getSignupUrl({String scope = 'read', String? state}) {
     return Uri(
-        scheme: parseScheme(),
-        host: parseHost(),
-        port: parsePort(),
-        path: '/signup/oauth/authorize',
-        queryParameters: {
-          'client_id': config.clientId,
-          'response_type': 'code',
-          'scope': scope,
-          'state': state ?? config.appName,
-          'code_challenge_method': 'S256',
-          'nonce': nonce,
-          'code_challenge': generateCodeChallenge(codeVerifier),
-          'redirect_uri': config.redirectUri
-        });
+      scheme: parseScheme(),
+      host: parseHost(),
+      port: parsePort(),
+      path: '/signup/oauth/authorize',
+      queryParameters: {
+        'client_id': config.clientId,
+        'response_type': 'code',
+        'scope': scope,
+        'state': state ?? config.appName,
+        'code_challenge_method': 'S256',
+        'nonce': nonce,
+        'code_challenge': generateCodeChallenge(codeVerifier),
+        'redirect_uri': config.redirectUri,
+      },
+    );
   }
 
-  Future<String> show({
-    String scope = 'read',
-    String? state,
-  }) async {
-    return CasdoorOauth.authenticate(CasdoorSdkParams(
-      url: getSigninUrl(scope: scope, state: state).toString(),
-      callbackUrlScheme: config.callbackUrlScheme,
-    ));
+  Future<String> show({String scope = 'read', String? state}) async {
+    return CasdoorOauth.authenticate(
+      CasdoorSdkParams(
+        url: getSigninUrl(scope: scope, state: state).toString(),
+        callbackUrlScheme: config.callbackUrlScheme,
+      ),
+    );
   }
 
   Future<String> showFullscreen(
@@ -102,34 +103,49 @@ class Casdoor {
     bool? isMaterialStyle,
     String scope = 'read',
     String? state,
+
+    List<String>? urlContainsFilters,
+    bool monitorUrlChanges = true,
+    int urlCheckIntervalMs = 500,
+    Function(String url)? onUrlChange,
   }) {
-    return CasdoorOauth.authenticate(CasdoorSdkParams(
-      url: getSigninUrl(scope: scope, state: state).toString(),
-      callbackUrlScheme: config.callbackUrlScheme,
-      buildContext: buildContext,
-      showFullscreen: true,
-      isMaterialStyle: isMaterialStyle ?? true,
-    ));
+    return CasdoorOauth.authenticate(
+      CasdoorSdkParams(
+        url: getSigninUrl(scope: scope, state: state).toString(),
+        callbackUrlScheme: config.callbackUrlScheme,
+        buildContext: buildContext,
+        showFullscreen: true,
+        isMaterialStyle: isMaterialStyle ?? true,
+        urlContainsFilters: urlContainsFilters,
+        monitorUrlChanges: monitorUrlChanges,
+        urlCheckIntervalMs: urlCheckIntervalMs,
+        onUrlChange: onUrlChange,
+      ),
+    );
   }
 
   Future<http.Response> requestOauthAccessToken(String code) async {
     return await http.post(
-        Uri(
-          scheme: parseScheme(),
-          host: parseHost(),
-          port: parsePort(),
-          path: 'api/login/oauth/access_token',
-        ),
-        body: {
-          'client_id': config.clientId,
-          'grant_type': 'authorization_code',
-          'code': code,
-          'code_verifier': codeVerifier
-        });
+      Uri(
+        scheme: parseScheme(),
+        host: parseHost(),
+        port: parsePort(),
+        path: 'api/login/oauth/access_token',
+      ),
+      body: {
+        'client_id': config.clientId,
+        'grant_type': 'authorization_code',
+        'code': code,
+        'code_verifier': codeVerifier,
+      },
+    );
   }
 
-  Future<http.Response> refreshToken(String refreshToken, String? clientSecret,
-      {String scope = 'read'}) async {
+  Future<http.Response> refreshToken(
+    String refreshToken,
+    String? clientSecret, {
+    String scope = 'read',
+  }) async {
     final body = {
       'grant_type': 'refresh_token',
       'refresh_token': refreshToken,
@@ -140,13 +156,14 @@ class Casdoor {
       body['client_secret'] = clientSecret;
     }
     return await http.post(
-        Uri(
-          scheme: parseScheme(),
-          host: parseHost(),
-          port: parsePort(),
-          path: 'api/login/oauth/refresh_token',
-        ),
-        body: body);
+      Uri(
+        scheme: parseScheme(),
+        host: parseHost(),
+        port: parsePort(),
+        path: 'api/login/oauth/refresh_token',
+      ),
+      body: body,
+    );
   }
 
   Future<http.Response> tokenLogout(
@@ -156,17 +173,18 @@ class Casdoor {
     bool clearCache = false,
   }) async {
     final http.Response resp = await http.post(
-        Uri(
-          scheme: parseScheme(),
-          host: parseHost(),
-          port: parsePort(),
-          path: 'api/login/oauth/logout',
-        ),
-        body: {
-          'id_token_hint': idTokenHint,
-          'post_logout_redirect_uri': postLogoutRedirectUri,
-          'state': state
-        });
+      Uri(
+        scheme: parseScheme(),
+        host: parseHost(),
+        port: parsePort(),
+        path: 'api/login/oauth/logout',
+      ),
+      body: {
+        'id_token_hint': idTokenHint,
+        'post_logout_redirect_uri': postLogoutRedirectUri,
+        'state': state,
+      },
+    );
     if (clearCache == true) {
       await CasdoorOauth.clearCache();
     }
@@ -206,8 +224,10 @@ String generateRandomString(int length) {
   final random = Random();
   const availableChars =
       'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz1234567890';
-  final randomString = List.generate(length,
-      (index) => availableChars[random.nextInt(availableChars.length)]).join();
+  final randomString = List.generate(
+    length,
+    (index) => availableChars[random.nextInt(availableChars.length)],
+  ).join();
 
   return randomString;
 }
