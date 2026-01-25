@@ -43,6 +43,12 @@ class CasdoorSdkParams {
     this.showFullscreen = false,
     this.isMaterialStyle = true,
     this.clearCache = false,
+    // YENİ PARAMETRELER 👇
+    this.urlContainsFilters,
+    this.hrefClickFilters,
+    this.monitorUrlChanges = true,
+    this.urlCheckIntervalMs = 500,
+    this.onUrlChange,
   });
 
   final String url;
@@ -52,6 +58,13 @@ class CasdoorSdkParams {
   bool isMaterialStyle;
   bool clearCache;
 
+  // YENİ 👇
+  final List<String>? urlContainsFilters;
+  final List<String>? hrefClickFilters; // Tıklama yakalanacak href pattern'leri
+  final bool monitorUrlChanges;
+  final int urlCheckIntervalMs;
+  final Function(String url)? onUrlChange;
+
   CasdoorSdkParams copyWith({
     String? url,
     String? callbackUrlScheme,
@@ -59,13 +72,24 @@ class CasdoorSdkParams {
     bool? showFullscreen,
     bool? isMaterialStyle,
     bool? clearCache,
-  }) =>
-      CasdoorSdkParams(
-        url: url ?? this.url,
-        callbackUrlScheme: callbackUrlScheme ?? this.callbackUrlScheme,
-        buildContext: buildContext ?? this.buildContext,
-        showFullscreen: showFullscreen ?? this.showFullscreen,
-        isMaterialStyle: isMaterialStyle ?? this.isMaterialStyle,
-        clearCache: clearCache ?? this.clearCache,
-      );
+    // YENİ 👇
+    List<String>? urlContainsFilters,
+    List<String>? hrefClickFilters,
+    bool? monitorUrlChanges,
+    int? urlCheckIntervalMs,
+    Function(String url)? onUrlChange,
+  }) => CasdoorSdkParams(
+    url: url ?? this.url,
+    callbackUrlScheme: callbackUrlScheme ?? this.callbackUrlScheme,
+    buildContext: buildContext ?? this.buildContext,
+    showFullscreen: showFullscreen ?? this.showFullscreen,
+    isMaterialStyle: isMaterialStyle ?? this.isMaterialStyle,
+    clearCache: clearCache ?? this.clearCache,
+    // YENİ 👇
+    urlContainsFilters: urlContainsFilters ?? this.urlContainsFilters,
+    hrefClickFilters: hrefClickFilters ?? this.hrefClickFilters,
+    monitorUrlChanges: monitorUrlChanges ?? this.monitorUrlChanges,
+    urlCheckIntervalMs: urlCheckIntervalMs ?? this.urlCheckIntervalMs,
+    onUrlChange: onUrlChange ?? this.onUrlChange,
+  );
 }

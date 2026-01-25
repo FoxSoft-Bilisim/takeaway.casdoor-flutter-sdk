@@ -14,6 +14,7 @@
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:casdoor_flutter_sdk/casdoor_flutter_sdk.dart';
@@ -30,13 +31,13 @@ class InAppAuthBrowser extends InAppBrowser {
 
   Function? onExitCallback;
   Future<NavigationActionPolicy> Function(Uri? url)?
-      onShouldOverrideUrlLoadingCallback;
+  onShouldOverrideUrlLoadingCallback;
 
   void setOnExitCallback(Function cb) => (onExitCallback = cb);
 
   void setOnShouldOverrideUrlLoadingCallback(
-          Future<NavigationActionPolicy> Function(Uri? url) cb) =>
-      onShouldOverrideUrlLoadingCallback = cb;
+    Future<NavigationActionPolicy> Function(Uri? url) cb,
+  ) => onShouldOverrideUrlLoadingCallback = cb;
 
   @override
   void onExit() {
@@ -47,7 +48,8 @@ class InAppAuthBrowser extends InAppBrowser {
 
   @override
   Future<NavigationActionPolicy> shouldOverrideUrlLoading(
-      NavigationAction navigationAction) async {
+    NavigationAction navigationAction,
+  ) async {
     if (onShouldOverrideUrlLoadingCallback != null) {
       return onShouldOverrideUrlLoadingCallback!(navigationAction.request.url);
     }
@@ -59,10 +61,7 @@ class InAppAuthBrowser extends InAppBrowser {
 // -----------------------------------------------------------------------------
 
 class FullScreenAuthPage extends StatefulWidget {
-  const FullScreenAuthPage({
-    super.key,
-    required this.params,
-  });
+  const FullScreenAuthPage({super.key, required this.params});
 
   final CasdoorSdkParams params;
 
@@ -76,7 +75,8 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
   Timer? _minimumDisplayTimer;
   bool _webViewReady = false;
   InAppWebViewController? _webViewController;
-  bool _isDisposed = false; // Disposed kontrolü
+  bool _isDisposed = false;
+  String? _currentUrl; // YENİ: Mevcut URL'i takip et
 
   static const Color primaryColor = Color(0xFF00897C);
   static const Color secondaryColor = Color(0xFFEC6608);
@@ -102,6 +102,154 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
     super.dispose();
   }
 
+  // YENİ: URL kontrolü metodu
+  bool _checkUrl(String url) {
+    if (_currentUrl == url) return false;
+    _currentUrl = url;
+
+    debugPrint('📍 URL changed: $url');
+
+    // onUrlChange callback
+    widget.params.onUrlChange?.call(url);
+
+    // Callback URL scheme kontrolü (mevcut)
+    final uri = Uri.parse(url);
+    if (uri.scheme == widget.params.callbackUrlScheme) {
+      debugPrint('✅ Callback URL detected: $url');
+      return true; // URL eşleşti
+    }
+
+    // YENİ: Custom string filtreler - URL'de belirli string varsa kapat
+    if (widget.params.urlContainsFilters != null) {
+      for (final filter in widget.params.urlContainsFilters!) {
+        if (url.contains(filter)) {
+          debugPrint('✅ URL filter matched: "$filter" in $url');
+          return true; // URL eşleşti
+        }
+      }
+    }
+
+    return false; // URL eşleşmedi
+  }
+
+  // YENİ: JavaScript injection ile URL monitoring ve click interception
+  Future<void> _injectUrlMonitor(InAppWebViewController controller) async {
+    if (!widget.params.monitorUrlChanges) return;
+
+    try {
+      // href click filters'ı JavaScript'e hazırla
+      final hrefFilters = widget.params.hrefClickFilters ?? [];
+      final hrefFiltersJson = jsonEncode(hrefFilters);
+
+      await controller.evaluateJavascript(
+        source:
+            '''
+        (function() {
+          if (window._casdoorMonitorInjected) return;
+          window._casdoorMonitorInjected = true;
+          
+          let lastUrl = window.location.href;
+          
+          // Href click filters
+          const hrefClickFilters = $hrefFiltersJson;
+          
+          function notifyUrlChange() {
+            const currentUrl = window.location.href;
+            if (currentUrl !== lastUrl) {
+              lastUrl = currentUrl;
+              // Flutter tarafına mesaj gönder
+              if (typeof flutter_inappwebview !== 'undefined' && 
+                  typeof flutter_inappwebview.callHandler === 'function') {
+                flutter_inappwebview.callHandler('urlChanged', currentUrl);
+              }
+            }
+          }
+          
+          // YENİ: Link click interceptor
+          function setupClickListener() {
+            document.addEventListener('click', function(event) {
+              // Tıklanan elementi ve parent'larını kontrol et
+              let target = event.target;
+              let clickedLink = null;
+              
+              // Parent'lara doğru çık, <a> tag'i bul
+              for (let i = 0; i < 5 && target; i++) {
+                if (target.tagName === 'A' && target.href) {
+                  clickedLink = target;
+                  break;
+                }
+                target = target.parentElement;
+              }
+              
+              if (!clickedLink) return;
+              
+              const href = clickedLink.href;
+              console.log('🔗 Link clicked:', href);
+              
+              // Href filters'ı kontrol et
+              let shouldIntercept = false;
+              for (const filter of hrefClickFilters) {
+                if (href.includes(filter) || href === filter) {
+                  console.log('✅ Href filter matched:', filter, 'in', href);
+                  shouldIntercept = true;
+                  break;
+                }
+              }
+              
+              if (shouldIntercept) {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                // Flutter'a bildir
+                if (typeof flutter_inappwebview !== 'undefined' && 
+                    typeof flutter_inappwebview.callHandler === 'function') {
+                  flutter_inappwebview.callHandler('hrefClicked', href);
+                }
+              }
+            }, true); // capture phase'de yakala
+            
+            console.log('✅ Click listener setup complete. Monitoring hrefs:', hrefClickFilters);
+          }
+          
+          // History API'yi override et
+          const originalPushState = history.pushState;
+          const originalReplaceState = history.replaceState;
+          
+          history.pushState = function() {
+            originalPushState.apply(history, arguments);
+            setTimeout(notifyUrlChange, 100);
+          };
+          
+          history.replaceState = function() {
+            originalReplaceState.apply(history, arguments);
+            setTimeout(notifyUrlChange, 100);
+          };
+          
+          // Hash değişikliklerini dinle
+          window.addEventListener('hashchange', notifyUrlChange);
+          
+          // Periyodik kontrol (fallback)
+          setInterval(notifyUrlChange, ${widget.params.urlCheckIntervalMs});
+          
+          // DOM hazır olduğunda click listener'ı kur
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupClickListener);
+          } else {
+            setupClickListener();
+          }
+          
+          // İlk URL'i bildir
+          notifyUrlChange();
+        })();
+      ''',
+      );
+      debugPrint('✅ URL monitor & click interceptor JavaScript injected');
+      debugPrint('📍 Monitoring href clicks: $hrefFilters');
+    } catch (e) {
+      debugPrint('⚠️ JavaScript injection error: $e');
+    }
+  }
+
   Future<bool> _onWillPop() async {
     if (_webViewController != null) {
       final canGoBack = await _webViewController!.canGoBack();
@@ -115,36 +263,91 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
 
   Widget webViewWidget(BuildContext ctx) {
     return InAppWebView(
-      initialUrlRequest:
-          URLRequest(url: WebUri.uri(Uri.parse(widget.params.url))),
+      initialUrlRequest: URLRequest(
+        url: WebUri.uri(Uri.parse(widget.params.url)),
+      ),
       initialSettings: InAppWebViewSettings(
         userAgent: CASDOOR_USER_AGENT,
         useShouldOverrideUrlLoading: true,
         useOnLoadResource: true,
         // Cache ve session yönetimi
-        cacheEnabled: false, // Cache'i devre dışı bırak
-        clearCache: true, // Her açılışta cache temizle
-        clearSessionCache: true, // Session cache temizle
-        incognito: true, // Incognito mode - hiçbir şey saklanmaz
+        cacheEnabled: false,
+        clearCache: true,
+        clearSessionCache: true,
+        incognito: true,
+        javaScriptEnabled: true, // YENİ: JavaScript'i açık tut
       ),
+      // YENİ: JavaScript handler ekle
       onWebViewCreated: (controller) {
         _webViewController = controller;
+
+        // JavaScript'ten gelen URL değişikliklerini dinle
+        controller.addJavaScriptHandler(
+          handlerName: 'urlChanged',
+          callback: (args) {
+            if (args.isNotEmpty && !_isDisposed && mounted) {
+              final url = args[0].toString();
+              final shouldClose = _checkUrl(url);
+
+              if (shouldClose) {
+                // WebView'ı kapat ve URL'i döndür
+                Navigator.pop(ctx, url);
+              }
+            }
+          },
+        );
+
+        // YENİ: Href click handler
+        controller.addJavaScriptHandler(
+          handlerName: 'hrefClicked',
+          callback: (args) {
+            if (args.isNotEmpty && !_isDisposed && mounted) {
+              final clickedHref = args[0].toString();
+              debugPrint('🔗 Href clicked (from JS): $clickedHref');
+
+              // JavaScript tarafı zaten filtreledi, direkt kapat
+              // onUrlChange callback'i çağır
+              widget.params.onUrlChange?.call(clickedHref);
+
+              // WebView'ı kapat ve href'i döndür
+              Navigator.pop(ctx, clickedHref);
+            }
+          },
+        );
+      },
+      // YENİ: URL navigation kontrolü
+      onLoadStart: (controller, url) {
+        if (url != null && !_isDisposed && mounted) {
+          final shouldClose = _checkUrl(url.toString());
+
+          if (shouldClose) {
+            // Loading'i durdur ve sayfayı kapat
+            controller.stopLoading().catchError((e) {
+              debugPrint('⚠️ Stop loading error: $e');
+            });
+            Navigator.pop(ctx, url.toString());
+          }
+        }
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
         final uri = navigationAction.request.url!;
+        final url = uri.toString();
 
-        if (uri.scheme == widget.params.callbackUrlScheme) {
+        // YENİ: URL kontrolü yap
+        final shouldClose = _checkUrl(url);
+
+        if (shouldClose) {
           // Callback URL yakalandı
           if (!_isDisposed && mounted) {
             // Loading'i durdur ve sayfayı kapat
             try {
               await controller.stopLoading();
             } catch (e) {
-              print('⚠️ Stop loading error: $e');
+              debugPrint('⚠️ Stop loading error: $e');
             }
 
             // Navigator'ı kapat ve callback URL'i döndür
-            Navigator.pop(ctx, uri.toString());
+            Navigator.pop(ctx, url);
           }
           return NavigationActionPolicy.CANCEL;
         }
@@ -152,11 +355,19 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
         return NavigationActionPolicy.ALLOW;
       },
       onProgressChanged: (controller, progress) {
-        setState(() {
-          this.progress = progress / 100;
-        });
+        if (mounted) {
+          setState(() {
+            this.progress = progress / 100;
+          });
+        }
       },
       onLoadStop: (controller, url) async {
+        // YENİ: Sayfa yüklendikten sonra JavaScript inject et
+        if (url != null && !_isDisposed && mounted) {
+          _checkUrl(url.toString());
+          await _injectUrlMonitor(controller);
+        }
+
         // Sayfa yüklendi, ek 500ms bekle (render için)
         await Future.delayed(const Duration(milliseconds: 500));
 
@@ -167,6 +378,16 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
           setState(() {
             _isLoading = false;
           });
+        }
+      },
+      // YENİ: History değişikliklerini yakala
+      onUpdateVisitedHistory: (controller, url, isReload) {
+        if (url != null && !_isDisposed && mounted && !(isReload ?? false)) {
+          final shouldClose = _checkUrl(url.toString());
+
+          if (shouldClose) {
+            Navigator.pop(context, url.toString());
+          }
         }
       },
     );
@@ -389,9 +610,38 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
     throw CasdoorAuthCancelledException;
   }
 
+  // YENİ: InAppBrowser için de URL monitoring ekle
   Future<String> _inAppBrowserAuth(CasdoorSdkParams params) async {
     final Completer<String> isFinished = Completer<String>();
     final InAppAuthBrowser browser = InAppAuthBrowser();
+
+    // YENİ: URL kontrolü için helper fonksiyon
+    bool checkUrl(Uri? returnUrl) {
+      if (returnUrl == null) return false;
+
+      final url = returnUrl.toString();
+
+      // onUrlChange callback
+      params.onUrlChange?.call(url);
+
+      // Callback URL scheme kontrolü
+      if (returnUrl.scheme == params.callbackUrlScheme) {
+        debugPrint('✅ InAppBrowser: Callback URL detected');
+        return true;
+      }
+
+      // YENİ: Custom string filtreler
+      if (params.urlContainsFilters != null) {
+        for (final filter in params.urlContainsFilters!) {
+          if (url.contains(filter)) {
+            debugPrint('✅ InAppBrowser: URL filter matched: "$filter"');
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }
 
     browser.setOnExitCallback(() {
       if (!isFinished.isCompleted) {
@@ -400,13 +650,17 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
     });
 
     browser.setOnShouldOverrideUrlLoadingCallback((returnUrl) async {
-      if (returnUrl != null) {
-        if (returnUrl.scheme == params.callbackUrlScheme) {
+      // YENİ: Her URL değişikliğinde kontrol et
+      final shouldClose = checkUrl(returnUrl);
+
+      if (shouldClose && returnUrl != null) {
+        if (!isFinished.isCompleted) {
           isFinished.complete(returnUrl.toString());
           browser.close();
-          return NavigationActionPolicy.CANCEL;
         }
+        return NavigationActionPolicy.CANCEL;
       }
+
       return NavigationActionPolicy.ALLOW;
     });
 
@@ -417,6 +671,7 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
           userAgent: CASDOOR_USER_AGENT,
           useOnLoadResource: true,
           useShouldOverrideUrlLoading: true,
+          javaScriptEnabled: true, // YENİ: JavaScript aktif
         ),
         browserSettings: InAppBrowserSettings(
           hideUrlBar: true,
@@ -445,15 +700,19 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
       ),
       onComplete:
           (WebUri? returnUrl, WebAuthenticationSessionError? error) async {
-        if (returnUrl != null) {
-          isFinished.complete(returnUrl.rawValue);
-        }
-        await session?.dispose();
-        session = null;
-        if (!isFinished.isCompleted) {
-          isFinished.completeError(CasdoorAuthCancelledException);
-        }
-      },
+            if (returnUrl != null) {
+              // YENİ: URL kontrolü ve callback
+              final url = returnUrl.rawValue;
+              params.onUrlChange?.call(url);
+
+              isFinished.complete(url);
+            }
+            await session?.dispose();
+            session = null;
+            if (!isFinished.isCompleted) {
+              isFinished.completeError(CasdoorAuthCancelledException);
+            }
+          },
     );
 
     if (await session?.canStart() ?? false) {
@@ -468,16 +727,19 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
 
   @override
   Future<String> authenticate(CasdoorSdkParams params) async {
-    final CasdoorSdkParams newParams =
-        (willClearCache == true) ? params.copyWith(clearCache: true) : params;
+    final CasdoorSdkParams newParams = (willClearCache == true)
+        ? params.copyWith(clearCache: true)
+        : params;
 
     if (newParams.clearCache == true) {
       await clearCache();
       willClearCache = false;
     }
 
-    if (([TargetPlatform.android, TargetPlatform.iOS]
-            .contains(defaultTargetPlatform)) &&
+    if (([
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+        ].contains(defaultTargetPlatform)) &&
         (params.showFullscreen == true)) {
       return _fullScreenAuth(newParams);
     } else if ((defaultTargetPlatform == TargetPlatform.iOS) &&
