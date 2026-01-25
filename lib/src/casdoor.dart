@@ -51,48 +51,70 @@ class Casdoor {
     return uri.port;
   }
 
-  Uri getSigninUrl({String scope = 'read', String? state}) {
+  Uri getSigninUrl({String scope = 'read', String? state, String? language}) {
+    final queryParams = {
+      'client_id': config.clientId,
+      'response_type': 'code',
+      'scope': scope,
+      'state': state ?? config.appName,
+      'code_challenge_method': 'S256',
+      'nonce': nonce,
+      'code_challenge': generateCodeChallenge(codeVerifier),
+      'redirect_uri': config.redirectUri,
+    };
+
+    // Language parametresi varsa ekle
+    if (language != null && language.isNotEmpty) {
+      queryParams['language'] = language;
+    }
+
     return Uri(
       scheme: parseScheme(),
       host: parseHost(),
       port: parsePort(),
       path: 'login/oauth/authorize',
-      queryParameters: {
-        'client_id': config.clientId,
-        'response_type': 'code',
-        'scope': scope,
-        'state': state ?? config.appName,
-        'code_challenge_method': 'S256',
-        'nonce': nonce,
-        'code_challenge': generateCodeChallenge(codeVerifier),
-        'redirect_uri': config.redirectUri,
-      },
+      queryParameters: queryParams,
     );
   }
 
-  Uri getSignupUrl({String scope = 'read', String? state}) {
+  Uri getSignupUrl({String scope = 'read', String? state, String? language}) {
+    final queryParams = {
+      'client_id': config.clientId,
+      'response_type': 'code',
+      'scope': scope,
+      'state': state ?? config.appName,
+      'code_challenge_method': 'S256',
+      'nonce': nonce,
+      'code_challenge': generateCodeChallenge(codeVerifier),
+      'redirect_uri': config.redirectUri,
+    };
+
+    // Language parametresi varsa ekle
+    if (language != null && language.isNotEmpty) {
+      queryParams['language'] = language;
+    }
+
     return Uri(
       scheme: parseScheme(),
       host: parseHost(),
       port: parsePort(),
       path: '/signup/oauth/authorize',
-      queryParameters: {
-        'client_id': config.clientId,
-        'response_type': 'code',
-        'scope': scope,
-        'state': state ?? config.appName,
-        'code_challenge_method': 'S256',
-        'nonce': nonce,
-        'code_challenge': generateCodeChallenge(codeVerifier),
-        'redirect_uri': config.redirectUri,
-      },
+      queryParameters: queryParams,
     );
   }
 
-  Future<String> show({String scope = 'read', String? state}) async {
+  Future<String> show({
+    String scope = 'read',
+    String? state,
+    String? language,
+  }) async {
     return CasdoorOauth.authenticate(
       CasdoorSdkParams(
-        url: getSigninUrl(scope: scope, state: state).toString(),
+        url: getSigninUrl(
+          scope: scope,
+          state: state,
+          language: language,
+        ).toString(),
         callbackUrlScheme: config.callbackUrlScheme,
       ),
     );
@@ -103,20 +125,28 @@ class Casdoor {
     bool? isMaterialStyle,
     String scope = 'read',
     String? state,
-
+    String? language,
+    // YENİ PARAMETRELER 👇
     List<String>? urlContainsFilters,
+    List<String>? hrefClickFilters,
     bool monitorUrlChanges = true,
     int urlCheckIntervalMs = 500,
     Function(String url)? onUrlChange,
   }) {
     return CasdoorOauth.authenticate(
       CasdoorSdkParams(
-        url: getSigninUrl(scope: scope, state: state).toString(),
+        url: getSigninUrl(
+          scope: scope,
+          state: state,
+          language: language,
+        ).toString(),
         callbackUrlScheme: config.callbackUrlScheme,
         buildContext: buildContext,
         showFullscreen: true,
         isMaterialStyle: isMaterialStyle ?? true,
+        // YENİ 👇
         urlContainsFilters: urlContainsFilters,
+        hrefClickFilters: hrefClickFilters,
         monitorUrlChanges: monitorUrlChanges,
         urlCheckIntervalMs: urlCheckIntervalMs,
         onUrlChange: onUrlChange,

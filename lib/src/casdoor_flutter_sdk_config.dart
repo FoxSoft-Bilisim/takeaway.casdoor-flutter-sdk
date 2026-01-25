@@ -43,9 +43,10 @@ class CasdoorSdkParams {
     this.showFullscreen = false,
     this.isMaterialStyle = true,
     this.clearCache = false,
-
+    // YENİ PARAMETRELER 👇
     this.urlContainsFilters,
-    this.monitorUrlChanges = true, // SPA desteği için
+    this.hrefClickFilters,
+    this.monitorUrlChanges = true,
     this.urlCheckIntervalMs = 500,
     this.onUrlChange,
   });
@@ -57,10 +58,12 @@ class CasdoorSdkParams {
   bool isMaterialStyle;
   bool clearCache;
 
-  final List<String>? urlContainsFilters; // URL'de aranacak string'ler
-  final bool monitorUrlChanges; // SPA URL değişikliklerini izle
-  final int urlCheckIntervalMs; // Polling interval (ms)
-  final Function(String url)? onUrlChange; // Her URL değişiminde callback
+  // YENİ 👇
+  final List<String>? urlContainsFilters;
+  final List<String>? hrefClickFilters; // Tıklama yakalanacak href pattern'leri
+  final bool monitorUrlChanges;
+  final int urlCheckIntervalMs;
+  final Function(String url)? onUrlChange;
 
   CasdoorSdkParams copyWith({
     String? url,
@@ -69,8 +72,9 @@ class CasdoorSdkParams {
     bool? showFullscreen,
     bool? isMaterialStyle,
     bool? clearCache,
-
+    // YENİ 👇
     List<String>? urlContainsFilters,
+    List<String>? hrefClickFilters,
     bool? monitorUrlChanges,
     int? urlCheckIntervalMs,
     Function(String url)? onUrlChange,
@@ -81,7 +85,9 @@ class CasdoorSdkParams {
     showFullscreen: showFullscreen ?? this.showFullscreen,
     isMaterialStyle: isMaterialStyle ?? this.isMaterialStyle,
     clearCache: clearCache ?? this.clearCache,
+    // YENİ 👇
     urlContainsFilters: urlContainsFilters ?? this.urlContainsFilters,
+    hrefClickFilters: hrefClickFilters ?? this.hrefClickFilters,
     monitorUrlChanges: monitorUrlChanges ?? this.monitorUrlChanges,
     urlCheckIntervalMs: urlCheckIntervalMs ?? this.urlCheckIntervalMs,
     onUrlChange: onUrlChange ?? this.onUrlChange,
