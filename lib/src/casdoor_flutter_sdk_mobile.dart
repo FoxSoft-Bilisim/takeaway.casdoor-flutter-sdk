@@ -71,12 +71,10 @@ class FullScreenAuthPage extends StatefulWidget {
 
 class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
   double progress = 0;
-  bool _isLoading = true;
-  Timer? _minimumDisplayTimer;
-  bool _webViewReady = false;
   InAppWebViewController? _webViewController;
   bool _isDisposed = false;
   String? _currentUrl; // YENİ: Mevcut URL'i takip et
+  bool _webViewVisible = false; // WebView görünürlük kontrolü
 
   static const Color primaryColor = Color(0xFF00897C);
   static const Color secondaryColor = Color(0xFFEC6608);
@@ -84,20 +82,11 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
   @override
   void initState() {
     super.initState();
-    // Minimum 2 saniye overlay göster
-    _minimumDisplayTimer = Timer(const Duration(milliseconds: 2000), () {
-      if (_webViewReady && mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    });
   }
 
   @override
   void dispose() {
     _isDisposed = true;
-    _minimumDisplayTimer?.cancel();
     _webViewController = null;
     super.dispose();
   }
@@ -368,16 +357,22 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
           await _injectUrlMonitor(controller);
         }
 
-        // Sayfa yüklendi, ek 500ms bekle (render için)
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Sayfa tamamen render olması için ekstra bekleme
+        await Future.delayed(const Duration(milliseconds: 800));
 
-        _webViewReady = true;
-
-        // Timer bittiyse overlay'i kapat
-        if (!(_minimumDisplayTimer?.isActive ?? false) && mounted) {
+        // WebView'ı görünür yap
+        if (!_isDisposed && mounted) {
           setState(() {
-            _isLoading = false;
+            _webViewVisible = true;
           });
+        }
+
+        // Fade-in tamamlansın diye kısa bekle
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // Sayfa tamamen yüklendi callback'i
+        if (!_isDisposed && mounted) {
+          widget.params.onPageCompleted?.call();
         }
       },
       // YENİ: History değişikliklerini yakala
@@ -405,80 +400,17 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
         }
       },
       child: Scaffold(
-        backgroundColor: primaryColor,
-        body: Stack(
-          children: [
-            // WebView (arka planda)
-            SafeArea(
-              top: false,
-              bottom: false,
-              left: false,
-              right: false,
-              child: webViewWidget(ctx),
-            ),
-
-            // Loading Overlay
-            if (_isLoading)
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                  child: Container(
-                    color: primaryColor.withOpacity(0.95),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 70,
-                            height: 70,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.15),
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(14),
-                            child: const CircularProgressIndicator(
-                              strokeWidth: 4,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                secondaryColor,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Giriş ekranı yükleniyor...',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Lütfen bekleyin',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.9),
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          SizedBox(
-                            width: 200,
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              backgroundColor: Colors.white.withOpacity(0.2),
-                              valueColor: const AlwaysStoppedAnimation<Color>(
-                                secondaryColor,
-                              ),
-                              minHeight: 3,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          top: false,
+          bottom: false,
+          left: false,
+          right: false,
+          child: AnimatedOpacity(
+            opacity: _webViewVisible ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 300),
+            child: webViewWidget(ctx),
+          ),
         ),
       ),
     );
@@ -496,63 +428,17 @@ class _FullScreenAuthPageState extends State<FullScreenAuthPage> {
         }
       },
       child: CupertinoPageScaffold(
-        backgroundColor: primaryColor,
-        child: Stack(
-          children: [
-            SafeArea(
-              top: false,
-              bottom: false,
-              left: false,
-              right: false,
-              child: webViewWidget(ctx),
-            ),
-            if (_isLoading)
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                  child: Container(
-                    color: primaryColor.withOpacity(0.95),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 70,
-                            height: 70,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.15),
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(14),
-                            child: const CupertinoActivityIndicator(
-                              radius: 20,
-                              color: secondaryColor,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Giriş ekranı yükleniyor...',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Lütfen bekleyin',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.9),
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+        backgroundColor: Colors.transparent,
+        child: SafeArea(
+          top: false,
+          bottom: false,
+          left: false,
+          right: false,
+          child: AnimatedOpacity(
+            opacity: _webViewVisible ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 300),
+            child: webViewWidget(ctx),
+          ),
         ),
       ),
     );
@@ -591,11 +477,19 @@ class CasdoorFlutterSdkMobile extends CasdoorFlutterSdkPlatform {
   }
 
   Future<String> _fullScreenAuth(CasdoorSdkParams params) async {
-    // Route'u push et
+    // Route'u push et - transparent route ile splash ekranı görünsün
     final result = await Navigator.push(
       params.buildContext!,
-      MaterialPageRoute(
-        builder: (BuildContext ctx) => FullScreenAuthPage(params: params),
+      PageRouteBuilder(
+        opaque: false, // Transparent route
+        barrierColor: Colors.transparent,
+        pageBuilder: (BuildContext ctx, _, __) =>
+            FullScreenAuthPage(params: params),
+        transitionDuration: const Duration(milliseconds: 300),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // Fade transition
+          return FadeTransition(opacity: animation, child: child);
+        },
       ),
     );
 
