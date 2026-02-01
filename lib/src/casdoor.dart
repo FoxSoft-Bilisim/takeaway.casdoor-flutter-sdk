@@ -132,6 +132,7 @@ class Casdoor {
     bool monitorUrlChanges = true,
     int urlCheckIntervalMs = 500,
     Function(String url)? onUrlChange,
+    Function()? onPageCompleted,
   }) {
     return CasdoorOauth.authenticate(
       CasdoorSdkParams(
@@ -150,6 +151,7 @@ class Casdoor {
         monitorUrlChanges: monitorUrlChanges,
         urlCheckIntervalMs: urlCheckIntervalMs,
         onUrlChange: onUrlChange,
+        onPageCompleted: onPageCompleted,
       ),
     );
   }

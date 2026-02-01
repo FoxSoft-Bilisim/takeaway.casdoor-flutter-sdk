@@ -49,6 +49,7 @@ class CasdoorSdkParams {
     this.monitorUrlChanges = true,
     this.urlCheckIntervalMs = 500,
     this.onUrlChange,
+    this.onPageCompleted,
   });
 
   final String url;
@@ -64,6 +65,7 @@ class CasdoorSdkParams {
   final bool monitorUrlChanges;
   final int urlCheckIntervalMs;
   final Function(String url)? onUrlChange;
+  final Function()? onPageCompleted; // Sayfa tamamen yüklendiğinde çağrılır
 
   CasdoorSdkParams copyWith({
     String? url,
@@ -78,6 +80,7 @@ class CasdoorSdkParams {
     bool? monitorUrlChanges,
     int? urlCheckIntervalMs,
     Function(String url)? onUrlChange,
+    Function()? onPageCompleted,
   }) => CasdoorSdkParams(
     url: url ?? this.url,
     callbackUrlScheme: callbackUrlScheme ?? this.callbackUrlScheme,
@@ -91,5 +94,6 @@ class CasdoorSdkParams {
     monitorUrlChanges: monitorUrlChanges ?? this.monitorUrlChanges,
     urlCheckIntervalMs: urlCheckIntervalMs ?? this.urlCheckIntervalMs,
     onUrlChange: onUrlChange ?? this.onUrlChange,
+    onPageCompleted: onPageCompleted ?? this.onPageCompleted,
   );
 }
